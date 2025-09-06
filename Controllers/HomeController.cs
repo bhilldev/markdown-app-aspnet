@@ -1,31 +1,69 @@
-using System.Diagnostics;
 using Microsoft.AspNetCore.Mvc;
-using markdown_app_aspnet.Models;
+using Microsoft.Net.Http.Headers;
+using Microsoft.AspNetCore.WebUtilities;
+using System.Net;
+using markdown_app_aspnet.Utilities;
+
 
 namespace markdown_app_aspnet.Controllers;
 
-public class HomeController : Controller
+[ApiController]
+[Route("api/[controller]")]
+public class UploadController : ControllerBase
 {
-    private readonly ILogger<HomeController> _logger;
+    private readonly ILogger<UploadController> _logger;
+    private readonly string _targetFilePath = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
 
-    public HomeController(ILogger<HomeController> logger)
+    public UploadController(ILogger<UploadController> logger)
     {
         _logger = logger;
+        Directory.CreateDirectory(_targetFilePath);
     }
 
-    public IActionResult Index()
+    [HttpPost("upload")]
+    public async Task<IActionResult> UploadPhysical()
     {
-        return View();
-    }
+        var request = HttpContext.Request;
 
-    public IActionResult Privacy()
-    {
-        return View();
-    }
+        if (!MultipartRequestHelper.IsMultipartContentType(request.ContentType))
+        {
+            return BadRequest("Expected a multipart request");
+        }
 
-    [ResponseCache(Duration = 0, Location = ResponseCacheLocation.None, NoStore = true)]
-    public IActionResult Error()
-    {
-        return View(new ErrorViewModel { RequestId = Activity.Current?.Id ?? HttpContext.TraceIdentifier });
+        var boundary = HeaderUtilities.RemoveQuotes(
+            MediaTypeHeaderValue.Parse(request.ContentType!).Boundary).Value;
+
+        if (string.IsNullOrWhiteSpace(boundary))
+        {
+            return BadRequest("Missing content-type boundary.");
+        }
+
+        var reader = new MultipartReader(boundary, request.BodyReader.AsStream());
+
+        MultipartSection? section;
+        while ((section = await reader.ReadNextSectionAsync()) != null)
+        {
+            if (ContentDispositionHeaderValue.TryParse(section.ContentDisposition, out var contentDisposition))
+            {
+                if (contentDisposition.DispositionType.Equals("form-data") &&
+                    !string.IsNullOrEmpty(contentDisposition.FileName.Value))
+                {
+                    // Generate a safe filename
+                    var trustedFileNameForDisplay = WebUtility.HtmlEncode(contentDisposition.FileName.Value);
+                    var trustedFileNameForFileStorage = Path.GetRandomFileName();
+
+                    var saveToPath = Path.Combine(_targetFilePath, trustedFileNameForFileStorage);
+
+                    await using var targetStream = System.IO.File.Create(saveToPath);
+                    await section.Body.CopyToAsync(targetStream);
+
+                    _logger.LogInformation(
+                        "Uploaded file '{TrustedFileNameForDisplay}' saved to '{SaveToPath}'",
+                        trustedFileNameForDisplay, saveToPath);
+                }
+            }
+        }
+
+        return Ok(new { status = "uploaded" });
     }
 }
