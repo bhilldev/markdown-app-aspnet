@@ -7,4 +7,8 @@
     <RootNamespace>markdown_app_aspnet</RootNamespace>
   </PropertyGroup>
 
+  <ItemGroup>
+    <PackageReference Include="Markdig" Version="0.41.3" />
+  </ItemGroup>
+
 </Project>
