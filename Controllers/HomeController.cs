@@ -9,10 +9,12 @@ namespace markdown_app_aspnet.Controllers
     {
         private readonly ILogger<UploadController> _logger;
         private readonly string _uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
+        private readonly FileRegistry _registry;
 
-        public UploadController(ILogger<UploadController> logger)
+        public UploadController(ILogger<UploadController> logger, FileRegistry registry)
         {
             _logger = logger;
+            _registry = registry;
             Directory.CreateDirectory(_uploadFolder);
         }
 
@@ -26,7 +28,7 @@ namespace markdown_app_aspnet.Controllers
             var trustedFileName = Path.GetFileName(file.FileName);
             var savePath = Path.Combine(_uploadFolder, trustedFileName);
 
-            // Save the original uploaded file
+            // Save original uploaded file
             await using (var stream = System.IO.File.Create(savePath))
             {
                 await file.CopyToAsync(stream);
@@ -34,7 +36,7 @@ namespace markdown_app_aspnet.Controllers
 
             _logger.LogInformation("Uploaded file saved to '{SavePath}'", savePath);
 
-            // Read the uploaded file and clean Markdown
+            // Clean Markdown
             string cleanedText;
             try
             {
@@ -46,14 +48,21 @@ namespace markdown_app_aspnet.Controllers
                 return StatusCode(500, "Error processing Markdown file.");
             }
 
-            // Optionally save the cleaned version
-            var cleanedFilePath = Path.Combine(_uploadFolder, Path.GetFileNameWithoutExtension(trustedFileName) + "_cleaned.txt");
+            // Save cleaned version
+            var cleanedFileName = Path.GetFileNameWithoutExtension(trustedFileName) + "_cleaned.txt";
+            var cleanedFilePath = Path.Combine(_uploadFolder, cleanedFileName);
             await System.IO.File.WriteAllTextAsync(cleanedFilePath, cleanedText);
+
+            // Register both files in the registry
+            var fileId = Guid.NewGuid().ToString("N");
+            _registry.AddFile(fileId, savePath);
+            _registry.AddFile(fileId + "_cleaned", cleanedFilePath);
 
             return Ok(new
             {
+                fileId,
                 originalFile = trustedFileName,
-                cleanedFile = Path.GetFileName(cleanedFilePath),
+                cleanedFile = cleanedFileName,
                 cleanedContentPreview = cleanedText.Length > 200 ? cleanedText.Substring(0, 200) + "..." : cleanedText
             });
         }
