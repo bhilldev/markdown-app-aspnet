@@ -8,35 +8,43 @@ namespace markdown_app_aspnet.Controllers
     public class UploadController : ControllerBase
     {
         private readonly ILogger<UploadController> _logger;
-        private readonly string _uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
-        private readonly FileRegistry _registry;
+        private readonly string _uploadFolder;
+        private readonly FileRegistry _fileRegistry;
 
-        public UploadController(ILogger<UploadController> logger, FileRegistry registry)
+        public UploadController(ILogger<UploadController> logger)
         {
             _logger = logger;
-            _registry = registry;
+            _uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
             Directory.CreateDirectory(_uploadFolder);
+
+            // Initialize registry file inside uploads folder
+            var registryPath = Path.Combine(_uploadFolder, "file_registry.json");
+            _fileRegistry = new FileRegistry(registryPath);
         }
 
-        [HttpPost("upload")]
+        [HttpPost]
         public async Task<IActionResult> UploadFile([FromForm] IFormFile file)
         {
             if (file == null || file.Length == 0)
                 return BadRequest("No file uploaded.");
 
-            // Sanitize filename
-            var trustedFileName = Path.GetFileName(file.FileName);
-            var savePath = Path.Combine(_uploadFolder, trustedFileName);
+            // Client’s original filename (sanitized)
+            var originalFileName = Path.GetFileName(file.FileName);
 
-            // Save original uploaded file
+            // Generate safe, unique filename for storage
+            var uniqueFileName = $"{Guid.NewGuid()}{Path.GetExtension(originalFileName)}";
+            var savePath = Path.Combine(_uploadFolder, uniqueFileName);
+
+            // Save uploaded file
             await using (var stream = System.IO.File.Create(savePath))
             {
                 await file.CopyToAsync(stream);
             }
 
-            _logger.LogInformation("Uploaded file saved to '{SavePath}'", savePath);
+            _logger.LogInformation("Uploaded file '{OriginalName}' saved as '{UniqueName}' at '{SavePath}'",
+                originalFileName, uniqueFileName, savePath);
 
-            // Clean Markdown
+            // Clean Markdown -> plain text
             string cleanedText;
             try
             {
@@ -49,19 +57,18 @@ namespace markdown_app_aspnet.Controllers
             }
 
             // Save cleaned version
-            var cleanedFileName = Path.GetFileNameWithoutExtension(trustedFileName) + "_cleaned.txt";
+            var cleanedFileName = $"{Path.GetFileNameWithoutExtension(uniqueFileName)}_cleaned.txt";
             var cleanedFilePath = Path.Combine(_uploadFolder, cleanedFileName);
             await System.IO.File.WriteAllTextAsync(cleanedFilePath, cleanedText);
 
-            // Register both files in the registry
-            var fileId = Guid.NewGuid().ToString("N");
-            _registry.AddFile(fileId, savePath);
-            _registry.AddFile(fileId + "_cleaned", cleanedFilePath);
+            // Register in file_registry.json
+            await _fileRegistry.RegisterFileAsync(originalFileName, uniqueFileName, cleanedFileName);
 
+            // Response
             return Ok(new
             {
-                fileId,
-                originalFile = trustedFileName,
+                originalFile = originalFileName,
+                storedFile = uniqueFileName,
                 cleanedFile = cleanedFileName,
                 cleanedContentPreview = cleanedText.Length > 200 ? cleanedText.Substring(0, 200) + "..." : cleanedText
             });

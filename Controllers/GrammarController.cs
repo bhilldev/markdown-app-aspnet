@@ -1,7 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
-using System.Net.Http;
 using System.Text;
-using System.Threading.Tasks;
 
 namespace markdown_app_aspnet.Controllers
 {
