@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using markdown_app_aspnet.Utilities;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 
@@ -12,30 +11,30 @@ namespace markdown_app_aspnet.Controllers
     {
         private readonly FileRegistry _fileRegistry;
         private readonly ILogger<GrammarController> _logger;
-        private readonly IHttpClientFactory _httpClientFactory;
+        private readonly IHttpClientFactory _httpClientFactory; // ✅ class-level field
 
         public GrammarController(FileRegistry fileRegistry, ILogger<GrammarController> logger, IHttpClientFactory httpClientFactory)
         {
             _fileRegistry = fileRegistry;
             _logger = logger;
-            _httpClientFactory = httpClientFactory;
+            _httpClientFactory = httpClientFactory; // ✅ assign in constructor
         }
 
         [HttpPost("check/{originalFileName}")]
         public async Task<IActionResult> CheckGrammar(string originalFileName)
         {
-            // 1. Lookup cleaned file
             var fileEntry = await _fileRegistry.GetFileByOriginalNameAsync(originalFileName);
-            if (fileEntry == null) return NotFound("File not found in registry.");
+            if (fileEntry == null)
+                return NotFound("File not found in registry.");
 
-            var cleanedFilePath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", fileEntry.CleanedFile);
-            if (!System.IO.File.Exists(cleanedFilePath)) return NotFound("Cleaned file not found on disk.");
+            var filePath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", fileEntry.StoredFile);
+            if (!System.IO.File.Exists(filePath))
+                return NotFound("Uploaded file not found on disk.");
 
             var grammarResults = new List<JsonElement>();
             var annotatedText = new StringBuilder();
 
-            // 2. Read file line by line
-            using var reader = new StreamReader(cleanedFilePath);
+            using var reader = new StreamReader(filePath);
             string? line;
             while ((line = await reader.ReadLineAsync()) != null)
             {
@@ -47,34 +46,35 @@ namespace markdown_app_aspnet.Controllers
 
                 try
                 {
+                    // Send line to grammar API
                     var suggestion = await SendToGrammarApiAsync(line);
                     grammarResults.Add(suggestion);
 
-                    // For simplicity, append the original line. You could apply fixes if API provides them.
+                    // Keep original line in annotated text
                     annotatedText.AppendLine(line);
                 }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Failed to check grammar for line: {Line}", line);
-                    annotatedText.AppendLine(line); // keep line even if API fails
+                    annotatedText.AppendLine(line);
                 }
             }
 
-            // 3. Save a downloadable grammar-checked file
-            var checkedFileName = $"{Path.GetFileNameWithoutExtension(fileEntry.CleanedFile)}_grammar_checked.txt";
+            // Save grammar-checked file
+            var checkedFileName = $"{Path.GetFileNameWithoutExtension(fileEntry.StoredFile)}_grammar_checked.txt";
             var checkedFilePath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", checkedFileName);
             await System.IO.File.WriteAllTextAsync(checkedFilePath, annotatedText.ToString());
 
-            // 4. Return JSON + downloadable file name
             return Ok(new
             {
                 originalFile = originalFileName,
-                cleanedFile = fileEntry.CleanedFile,
+                storedFile = fileEntry.StoredFile,
                 grammarCheckedFile = checkedFileName,
                 grammarSuggestions = grammarResults
             });
         }
 
+        // ✅ Instance method using _httpClientFactory
         private async Task<JsonElement> SendToGrammarApiAsync(string text)
         {
             var client = _httpClientFactory.CreateClient();
@@ -86,7 +86,6 @@ namespace markdown_app_aspnet.Controllers
             };
 
             var content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
-
             var response = await client.PostAsync("https://api.languagetoolplus.com/v2/check", content);
             response.EnsureSuccessStatusCode();
 
@@ -96,3 +95,4 @@ namespace markdown_app_aspnet.Controllers
         }
     }
 }
+

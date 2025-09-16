@@ -44,33 +44,14 @@ namespace markdown_app_aspnet.Controllers
             _logger.LogInformation("Uploaded file '{OriginalName}' saved as '{UniqueName}' at '{SavePath}'",
                 originalFileName, uniqueFileName, savePath);
 
-            // Clean Markdown -> plain text
-            string cleanedText;
-            try
-            {
-                cleanedText = MarkdownCleaner.CleanMarkdownFile(savePath);
-            }
-            catch (Exception ex)
-            {
-                _logger.LogError(ex, "Failed to clean Markdown file.");
-                return StatusCode(500, "Error processing Markdown file.");
-            }
-
-            // Save cleaned version
-            var cleanedFileName = $"{Path.GetFileNameWithoutExtension(uniqueFileName)}_cleaned.txt";
-            var cleanedFilePath = Path.Combine(_uploadFolder, cleanedFileName);
-            await System.IO.File.WriteAllTextAsync(cleanedFilePath, cleanedText);
-
             // Register in file_registry.json
-            await _fileRegistry.RegisterFileAsync(originalFileName, uniqueFileName, cleanedFileName);
+            await _fileRegistry.RegisterFileAsync(originalFileName, uniqueFileName, null);
 
             // Response
             return Ok(new
             {
                 originalFile = originalFileName,
-                storedFile = uniqueFileName,
-                cleanedFile = cleanedFileName,
-                cleanedContentPreview = cleanedText.Length > 200 ? cleanedText.Substring(0, 200) + "..." : cleanedText
+                storedFile = uniqueFileName
             });
         }
     }
