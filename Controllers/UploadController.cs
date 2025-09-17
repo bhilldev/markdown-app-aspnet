@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Mvc;
 using markdown_app_aspnet.Utilities;
+using Markdig;
 
 namespace markdown_app_aspnet.Controllers
 {
@@ -53,6 +54,39 @@ namespace markdown_app_aspnet.Controllers
                 originalFile = originalFileName,
                 storedFile = uniqueFileName
             });
+        }
+
+
+        public async Task<IActionResult> ConvertToHtml(string originalFileName)
+        {
+            var fileEntry = await _fileRegistry.GetFileByOriginalNameAsync(originalFileName);
+            if (fileEntry == null)
+                return NotFound("File not found in registry.");
+
+            var filePath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", fileEntry.StoredFile);
+            if (!System.IO.File.Exists(filePath))
+                return NotFound("Uploaded file not found on disk.");
+
+            using var reader = new StreamReader(filePath);
+            // Configure the pipeline with all advanced extensions active
+            var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
+
+            string? line;
+            while ((line = reader.ReadLine()) != null)
+            {
+                var convertedToHtmlFile = Markdown.ToHtml(line, pipeline);
+
+            }
+
+            return Ok(new
+            {
+                originalFile = originalFileName,
+                storedFile = fileEntry.StoredFile,
+                htmlFile = convertedToHtmlFile
+            });
+
+
+
         }
     }
 }
