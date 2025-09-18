@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using markdown_app_aspnet.Utilities;
-using Markdig;
 
 namespace markdown_app_aspnet.Controllers
 {
@@ -18,7 +17,6 @@ namespace markdown_app_aspnet.Controllers
             _uploadFolder = Path.Combine(Directory.GetCurrentDirectory(), "uploads");
             Directory.CreateDirectory(_uploadFolder);
 
-            // Initialize registry file inside uploads folder
             var registryPath = Path.Combine(_uploadFolder, "file_registry.json");
             _fileRegistry = new FileRegistry(registryPath);
         }
@@ -29,14 +27,10 @@ namespace markdown_app_aspnet.Controllers
             if (file == null || file.Length == 0)
                 return BadRequest("No file uploaded.");
 
-            // Client’s original filename (sanitized)
             var originalFileName = Path.GetFileName(file.FileName);
-
-            // Generate safe, unique filename for storage
             var uniqueFileName = $"{Guid.NewGuid()}{Path.GetExtension(originalFileName)}";
             var savePath = Path.Combine(_uploadFolder, uniqueFileName);
 
-            // Save uploaded file
             await using (var stream = System.IO.File.Create(savePath))
             {
                 await file.CopyToAsync(stream);
@@ -45,49 +39,50 @@ namespace markdown_app_aspnet.Controllers
             _logger.LogInformation("Uploaded file '{OriginalName}' saved as '{UniqueName}' at '{SavePath}'",
                 originalFileName, uniqueFileName, savePath);
 
-            // Register in file_registry.json
-            await _fileRegistry.RegisterFileAsync(originalFileName, uniqueFileName, null);
+            string? htmlFileName = null;
+            string? htmlFilePath = null;
 
-            // Response
+            if (Path.GetExtension(originalFileName).Equals(".md", StringComparison.OrdinalIgnoreCase))
+            {
+                htmlFileName = $"{Path.GetFileNameWithoutExtension(uniqueFileName)}.html";
+                htmlFilePath = Path.Combine(_uploadFolder, htmlFileName);
+
+                try
+                {
+                    MarkdownToHtmlConverter.ConvertFileToHtml(savePath, htmlFilePath, originalFileName);
+                    _logger.LogInformation("Converted Markdown file '{OriginalName}' to HTML '{HtmlFileName}'",
+                        originalFileName, htmlFileName);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to convert Markdown to HTML.");
+                }
+            }
+
+            await _fileRegistry.RegisterFileAsync(originalFileName, uniqueFileName, htmlFileName);
+
             return Ok(new
             {
                 originalFile = originalFileName,
-                storedFile = uniqueFileName
+                storedFile = uniqueFileName,
+                htmlFile = htmlFileName,
+                htmlUrl = htmlFileName != null ? Url.Action(nameof(GetHtmlFile), new { fileName = htmlFileName }) : null
             });
         }
 
-
-        public async Task<IActionResult> ConvertToHtml(string originalFileName)
+        // ✅ New endpoint: serve generated HTML file
+        [HttpGet("html/{fileName}")]
+        public IActionResult GetHtmlFile(string fileName)
         {
-            var fileEntry = await _fileRegistry.GetFileByOriginalNameAsync(originalFileName);
-            if (fileEntry == null)
-                return NotFound("File not found in registry.");
+            var filePath = Path.Combine(_uploadFolder, fileName);
 
-            var filePath = Path.Combine(Directory.GetCurrentDirectory(), "uploads", fileEntry.StoredFile);
             if (!System.IO.File.Exists(filePath))
-                return NotFound("Uploaded file not found on disk.");
+                return NotFound("HTML file not found.");
 
-            using var reader = new StreamReader(filePath);
-            // Configure the pipeline with all advanced extensions active
-            var pipeline = new MarkdownPipelineBuilder().UseAdvancedExtensions().Build();
-
-            string? line;
-            while ((line = reader.ReadLine()) != null)
-            {
-                var convertedToHtmlFile = Markdown.ToHtml(line, pipeline);
-
-            }
-
-            return Ok(new
-            {
-                originalFile = originalFileName,
-                storedFile = fileEntry.StoredFile,
-                htmlFile = convertedToHtmlFile
-            });
-
-
-
+            var htmlContent = System.IO.File.ReadAllText(filePath);
+            return Content(htmlContent, "text/html");
         }
     }
 }
+
 
